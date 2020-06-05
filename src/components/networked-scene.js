@@ -1,4 +1,4 @@
-var naf = require('../NafIndex');
+/* global AFRAME, NAF */
 
 AFRAME.registerComponent('networked-scene', {
   schema: {
@@ -34,7 +34,7 @@ AFRAME.registerComponent('networked-scene', {
     if (this.hasOnConnectFunction()) {
       this.callOnConnect();
     }
-    NAF.connection.connect(this.data.serverURL, this.data.app, this.data.room, this.data.audio);
+    return NAF.connection.connect(this.data.serverURL, this.data.app, this.data.room, this.data.audio);
   },
 
   checkDeprecatedProperties: function() {
@@ -45,6 +45,7 @@ AFRAME.registerComponent('networked-scene', {
     var adapterName = this.data.adapter;
     var adapter = NAF.adapters.make(adapterName);
     NAF.connection.setNetworkAdapter(adapter);
+    this.el.emit('adapter-ready', adapter, false);
   },
 
   hasOnConnectFunction: function() {

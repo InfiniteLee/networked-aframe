@@ -1,3 +1,4 @@
+/* global NAF */
 var ChildEntityCache = require('./ChildEntityCache');
 
 class NetworkEntities {
@@ -5,8 +6,8 @@ class NetworkEntities {
   constructor() {
     this.entities = {};
     this.childCache = new ChildEntityCache();
-
     this.onRemoteEntityCreatedEvent = new Event('remoteEntityCreated');
+    this._persistentFirstSyncs = {};
   }
 
   registerEntity(networkId, entity) {
@@ -17,9 +18,7 @@ class NetworkEntities {
     NAF.log.write('Creating remote entity', entityData);
 
     var networkId = entityData.networkId;
-
-    var el = document.createElement('a-entity');
-    el.setAttribute('id', 'naf-' + networkId);
+    var el = NAF.schemas.getCachedTemplate(entityData.template);
 
     this.initPosition(el, entityData.components);
     this.initRotation(el, entityData.components);
@@ -49,29 +48,42 @@ class NetworkEntities {
   addNetworkComponent(entity, entityData) {
     var networkData = {
       template: entityData.template,
+      creator: entityData.creator,
       owner: entityData.owner,
-      networkId: entityData.networkId
+      networkId: entityData.networkId,
+      persistent: entityData.persistent
     };
 
     entity.setAttribute('networked', networkData);
     entity.firstUpdateData = entityData;
   }
 
-  updateEntity(client, dataType, entityData) {
-    var isCompressed = entityData[0] == 1;
-    var networkId = isCompressed ? entityData[1] : entityData.networkId;
-
-    if (this.hasEntity(networkId)) {
-      this.entities[networkId].emit('networkUpdate', {entityData: entityData}, false);
-    } else if (!isCompressed && this.isFullSync(entityData)) {
-      this.receiveFirstUpdateFromEntity(entityData);
+  updateEntityMulti(client, dataType, entityDatas, source) {
+    if (NAF.options.syncSource && source !== NAF.options.syncSource) return;
+    for (let i = 0, l = entityDatas.d.length; i < l; i++) {
+      this.updateEntity(client, 'u', entityDatas.d[i], source);
     }
   }
 
-  isFullSync(entityData) {
-    var numSentComps = Object.keys(entityData.components).length;
-    var numTemplateComps = NAF.schemas.getComponents(entityData.template).length;
-    return numSentComps === numTemplateComps;
+  updateEntity(client, dataType, entityData, source) {
+    if (NAF.options.syncSource && source !== NAF.options.syncSource) return;
+    var networkId = entityData.networkId;
+
+    if (this.hasEntity(networkId)) {
+      this.entities[networkId].components.networked.networkUpdate(entityData);
+    } else if (entityData.isFirstSync && NAF.connection.activeDataChannels[entityData.owner] !== false) {
+      if (NAF.options.firstSyncSource && source !== NAF.options.firstSyncSource) {
+        NAF.log.write('Ignoring first sync from disallowed source', source);
+      } else {
+        if (entityData.persistent) {
+          // If we receive a firstSync for a persistent entity that we don't have yet,
+          // we assume the scene will create it at some point, so stash the update for later use.
+          this._persistentFirstSyncs[networkId] = entityData;
+        } else {
+          this.receiveFirstUpdateFromEntity(entityData);
+        }
+      }
+    }
   }
 
   receiveFirstUpdateFromEntity(entityData) {
@@ -94,7 +106,7 @@ class NetworkEntities {
       var childEntityData = children[i];
       var childId = childEntityData.networkId;
       if (this.hasEntity(childId)) {
-        console.warn(
+        NAF.log.warn(
           'Tried to instantiate entity multiple times',
           childId,
           childEntityData,
@@ -118,8 +130,7 @@ class NetworkEntities {
   }
 
   addEntityToParent(entity, parentId) {
-    var parentEl = document.getElementById('naf-' + parentId);
-    parentEl.appendChild(entity);
+    this.entities[parentId].appendChild(entity);
   }
 
   addEntityToSceneRoot(el) {
@@ -127,19 +138,16 @@ class NetworkEntities {
     scene.appendChild(el);
   }
 
-  completeSync(targetClientId) {
+  completeSync(targetClientId, isFirstSync) {
     for (var id in this.entities) {
       if (this.entities.hasOwnProperty(id)) {
-        this.entities[id].emit(
-          'syncAll',
-          { targetClientId },
-          false
-        );
+        this.entities[id].components.networked.syncAll(targetClientId, isFirstSync);
       }
     }
   }
 
-  removeRemoteEntity(toClient, dataType, data) {
+  removeRemoteEntity(toClient, dataType, data, source) {
+    if (NAF.options.syncSource && source !== NAF.options.syncSource) return;
     var id = data.networkId;
     return this.removeEntity(id);
   }
@@ -147,24 +155,47 @@ class NetworkEntities {
   removeEntitiesOfClient(clientId) {
     var entityList = [];
     for (var id in this.entities) {
-      var entityOwner = NAF.utils.getNetworkOwner(this.entities[id]);
-      if (entityOwner == clientId) {
-        var entity = this.removeEntity(id);
-        entityList.push(entity);
+      var entityCreator = NAF.utils.getCreator(this.entities[id]);
+      if (entityCreator === clientId) {
+        let persists;
+        const component = this.entities[id].getAttribute('networked');
+        if (component && component.persistent) {
+          persists = NAF.utils.isMine(this.entities[id]) || NAF.utils.takeOwnership(this.entities[id]);
+        }
+        if (!persists) {
+          var entity = this.removeEntity(id);
+          entityList.push(entity);
+        }
       }
     }
     return entityList;
   }
 
   removeEntity(id) {
+    this.forgetPersistentFirstSync(id);
+
     if (this.hasEntity(id)) {
       var entity = this.entities[id];
-      delete this.entities[id];
+      this.forgetEntity(id);
       entity.parentNode.removeChild(entity);
       return entity;
     } else {
+      NAF.log.error("Tried to remove entity I don't have.");
       return null;
     }
+  }
+
+  forgetEntity(id){
+    delete this.entities[id];
+    this.forgetPersistentFirstSync(id);
+  }
+
+  getPersistentFirstSync(id){
+    return this._persistentFirstSyncs[id];
+  }
+
+  forgetPersistentFirstSync(id){
+    delete this._persistentFirstSyncs[id];
   }
 
   getEntity(id) {

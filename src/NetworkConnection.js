@@ -1,4 +1,5 @@
-var ReservedDataType = { Update: 'u', Remove: 'r' };
+/* global NAF */
+var ReservedDataType = { Update: 'u', UpdateMulti: 'um', Remove: 'r' };
 
 class NetworkConnection {
 
@@ -19,6 +20,9 @@ class NetworkConnection {
 
     this.dataChannelSubs[ReservedDataType.Update]
         = this.entities.updateEntity.bind(this.entities);
+
+    this.dataChannelSubs[ReservedDataType.UpdateMulti]
+        = this.entities.updateEntityMulti.bind(this.entities);
 
     this.dataChannelSubs[ReservedDataType.Remove]
         = this.entities.removeRemoteEntity.bind(this.entities);
@@ -50,7 +54,7 @@ class NetworkConnection {
     );
     this.adapter.setRoomOccupantListener(this.occupantsReceived.bind(this));
 
-    this.adapter.connect();
+    return this.adapter.connect();
   }
 
   onConnect(callback) {
@@ -126,7 +130,7 @@ class NetworkConnection {
   dataChannelOpen(clientId) {
     NAF.log.write('Opened data channel from ' + clientId);
     this.activeDataChannels[clientId] = true;
-    this.entities.completeSync(clientId);
+    this.entities.completeSync(clientId, true);
 
     var evt = new CustomEvent('clientConnected', {detail: {clientId: clientId}});
     document.body.dispatchEvent(evt);
@@ -190,11 +194,11 @@ class NetworkConnection {
         || dataType == ReservedDataType.Remove;
   }
 
-  receivedData(fromClientId, dataType, data) {
+  receivedData(fromClientId, dataType, data, source) {
     if (this.dataChannelSubs.hasOwnProperty(dataType)) {
-      this.dataChannelSubs[dataType](fromClientId, dataType, data);
+      this.dataChannelSubs[dataType](fromClientId, dataType, data, source);
     } else {
-      NAF.log.error('NetworkConnection@receivedData: ' + dataType + ' has not been subscribed to yet. Call subscribeToDataChannel()');
+      NAF.log.write('NetworkConnection@receivedData: ' + dataType + ' has not been subscribed to yet. Call subscribeToDataChannel()');
     }
   }
 

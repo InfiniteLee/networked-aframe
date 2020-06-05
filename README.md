@@ -34,7 +34,7 @@ Features
 * Includes everything you need to create multi-user WebVR apps and games.
 * Support for WebRTC and/or WebSocket connections.
 * Voice chat. Audio streaming to let your users talk in-app (WebRTC only).
-* Bandwidth sensitive. Only send network updates when things change. Option to further compress network packets.
+* Bandwidth sensitive. Only send network updates when things change.
 * Extendable. Sync any A-Frame component, including your own, without changing the component code at all.
 * Cross-platform. Works on all modern Desktop and Mobile browsers. Oculus Rift, HTC Vive and Google Cardboard + Daydream support.
 * Firebase WebRTC signalling support
@@ -74,11 +74,11 @@ Basic Example
   <body>
     <a-scene networked-scene>
       <a-assets>
-        <script id="avatar-template" type="text/html">
-          <a-sphere></a-sphere>
-        </script>
+        <template id="avatar-template">
+           <a-sphere></a-sphere>
+        </template>
       </a-assets>
-      <a-entity id="player" networked="template:#avatar-template;showLocalTemplate:false;" camera wasd-controls look-controls>
+      <a-entity id="player" networked="template:#avatar-template;attachTemplateToLocal:false;" camera wasd-controls look-controls>
       </a-entity>
     </a-scene>
   </body>
@@ -102,7 +102,7 @@ Open in two tabs if nobody else is online.
 * [Minecraft Clone](https://uxvirtual.com/demo/blocks/)
 * [More...](http://haydenlee.io/networked-aframe/)
 
-Made something awesome with Networked-Aframe? [Let me know](https://twitter.com/haydenlee37) and I'll include it here!
+Made something awesome with Networked-Aframe? [Let us know](https://github.com/networked-aframe/networked-aframe/issues) and we'll include it here.
 
 
 Documentation
@@ -165,16 +165,61 @@ Completely removing `a-scene` from your page will also handle cleanly disconnect
 ### Creating Networked Entities
 
 ```html
-<a-entity networked="template=YOUR_TEMPLATE;showLocalTemplate=true"></a-entity>
+<a-assets>
+  <template id="my-template">
+    <a-entity>
+      <a-sphere color="#f00"></a-sphere>
+    </a-entity>
+  </template>
+<a-assets>
+
+<!-- Attach local template by default -->
+<a-entity networked="template: #my-template">
+</a-entity>
+
+<!-- Do not attach local template -->
+<a-entity networked="template:#my-template;attachTemplateToLocal:false">
+</a-entity>
 ```
 
 Create an instance of a template to be synced across clients. The position and rotation will be synced by default. The [`aframe-lerp-component`](https://github.com/haydenjameslee/aframe-lerp-component) is added to allow for less network updates while keeping smooth motion.
 
+Templates must only have one root element. When `attachTemplateToLocal` is set to true, the attributes on this element will be copied to the local entity and the children will be appended to the local entity. Remotely instantiated entities will be a copy of the root element of the template with the `networked` component added to it.
+
+#### Example `attachTemplateToLocal=true`
+
+```html
+<a-entity wasd-controls networked="template:#my-template">
+</a-entity>
+
+<!-- Locally instantiated as: -->
+<a-entity wasd-controls networked="template:#my-template">
+  <a-sphere color="#f00"></a-sphere>
+</a-entity>
+
+<!-- Remotely instantiated as: -->
+<a-entity networked="template:#my-template;networkId:123;">
+  <a-sphere color="#f00"></a-sphere>
+</a-entity>
+```
+#### Example `attachTemplateToLocal=false`
+
+```html
+<a-entity wasd-controls networked="template:#my-template;attachTemplateToLocal:false;">
+</a-entity>
+
+<!-- No changes to local entity on instantiation -->
+
+<!-- Remotely instantiated as: -->
+<a-entity networked="template:#my-template;networkId:123;">
+  <a-sphere color="#f00"></a-sphere>
+</a-entity>
+```
 
 | Parameter | Description | Default
 | -------- | ------------ | --------------
-| template  | A css selector to a script tag stored in `<a-assets>` - [Template documentation](https://github.com/ngokevin/kframe/tree/master/components/template) | ''
-| showLocalTemplate  | Set to false to hide the template for the local user. This is most useful for hiding your own avatar's head | true
+| template  | A css selector to a template tag stored in `<a-assets>` | ''
+| attachTemplateToLocal  | Does not attach the template for the local user when set to false. This is useful when there is different behavior locally and remotely. | true
 
 
 ### Deleting Networked Entities
@@ -220,8 +265,8 @@ Component data is retrieved by the A-Frame Component `data` property. During the
 To sync nested templates setup your HTML nodes like so:
 
 ```HTML
-<a-entity id="player" networked="template:#player-template;showLocalTemplate:false;" wasd-controls>
-  <a-entity camera look-controls networked="template:#head-template;showLocalTemplate:false;"></a-entity>
+<a-entity id="player" networked="template:#player-template;attachTemplateToLocal:false;" wasd-controls>
+  <a-entity camera look-controls networked="template:#head-template;attachTemplateToLocal:false;"></a-entity>
   <a-entity hand-controls="left" networked="template:#left-hand-template"></a-entity>
   <a-entity hand-controls="right" networked="template:#right-hand-template"></a-entity>
 </a-entity>
@@ -287,8 +332,21 @@ List of events:
 | clientConnected | Fired when another client connects to you | `evt.detail.clientId` - ClientId of connecting client |
 | clientDisconnected | Fired when another client disconnects from you | `evt.detail.clientId` - ClientId of disconnecting client |
 | entityCreated | Fired when a networked entity is created | `evt.detail.el` - new entity |
-| entityDeleted | Fired when a networked entity is deleted | `evt.detail.networkId` - networkId of deleted entity |
+| entityRemoved | Fired when a networked entity is deleted | `evt.detail.networkId` - networkId of deleted entity |
 
+The following events are fired on the `networked` component. See the [toggle-ownership component](./server/static/js/toggle-ownership.component.js) for examples.
+
+List of ownership transfer events:
+
+| Event | Description | Values |
+| -------- | ----------- | ------------- |
+| ownership-gained | Fired when a networked entity's ownership is taken | `evt.detail.el` - the entity whose ownership was gained |
+| | | `evt.detail.oldOwner` - the clientId of the previous owner |
+| ownership-lost | Fired when a networked entity's ownership is lost | `evt.detail.el` - the entity whose ownership was lost |
+| | | `evt.detail.newOwner` - the clientId of the new owner |
+| ownership-changed | Fired when a networked entity's ownership is changed | `evt.detail.el` - the entity whose ownership was lost |
+| | | `evt.detail.oldOwner` - the clientId of the previous owner |
+| | | `evt.detail.newOwner` - the clientId of the new owner |
 
 ### Adapters
 
@@ -300,7 +358,7 @@ NAF can be used with multiple network libraries and services. An adapter is a cl
 - Do you need custom server-side logic?
 - Do you want a WebSocket (client-server) network architecture or WebRTC (peer-to-peer)?
 
-I'll write up a post on the answers to these questions soon (please [bug me](https://twitter.com/haydenlee37) about it if you're interested).
+I'll write up a post on the answers to these questions soon (please [bug me](https://github.com/networked-aframe/networked-aframe/issues) about it if you're interested).
 
 By default the `wsEasyRtc` adapter is used, which is an implementation of the open source [EasyRTC](https://github.com/priologic/easyrtc) library that only uses the WebSocket connection. To quickly try WebRTC instead of WebSockets, change the adapter to `easyrtc`, which also supports audio. If you're interested in contributing to NAF a great opportunity is to add support for more adapters and send a pull request.
 
@@ -349,20 +407,11 @@ NAF.options.useLerp
 
 By default when an entity is created the [`aframe-lerp-component`](https://github.com/haydenjameslee/aframe-lerp-component) is attached to smooth out position and rotation network updates. Set this to false if you don't want the lerp component to be attached on creation.
 
-```javascript
-NAF.options.compressSyncPackets
-```
-
-Compress each sync packet into a minimized but harder to read JSON object for saving bandwidth. Default is `false`.
-
-To measure bandwidth usage, run two clients on Chrome and visit chrome://webrtc-internals
-
 Stay in Touch
 -------------
 
-- Follow Hayden on [Twitter](https://twitter.com/haydenlee37)
-- Follow changes on [GitHub](https://github.com/networked-aframe/networked-aframe/subscription)
 - Join the [A-Frame Slack](https://aframevr-slack.herokuapp.com) and add the #networked-aframe channel
+- Follow changes on [GitHub](https://github.com/networked-aframe/networked-aframe/subscription)
 - Let us know if you've made something with Networked-Aframe. We'd love to see it!
 
 
@@ -402,7 +451,7 @@ Roadmap
 * [Roadmap](https://github.com/networked-aframe/networked-aframe/projects/1)
 * [Add your suggestions](https://github.com/networked-aframe/networked-aframe/issues)
 
-Interested in contributing? [Shoot me a message](https://twitter.com/haydenlee37) or send a pull request.
+Interested in contributing? [Open an issue](https://github.com/networked-aframe/networked-aframe/issues) or send a pull request.
 
 
 Warning
